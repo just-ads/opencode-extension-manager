@@ -3,19 +3,10 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import {readConfig} from "../../core/config.js";
 import {detectPM, pmUpgrade} from "../../core/pm.js";
-import {getCacheDir} from "../../utils/paths.js";
-import {extractPackageName} from "../../utils/package.js";
 import {logger} from "../../utils/logger.js";
-
-function isLocalPluginSpecifier(input: string): boolean {
-  return (
-    input.startsWith("file://") ||
-    input.startsWith(".") ||
-    input.startsWith("/") ||
-    input.startsWith("~") ||
-    /^[A-Za-z]:[\\/]/.test(input)
-  );
-}
+import {extractPackageName} from "../../utils/package.js";
+import {getCacheDir} from "../../utils/paths.js";
+import {isLocalPluginSpecifier} from "../../utils/plugin-source.js";
 
 function getInstalledVersion(cacheDir: string, packageName: string): string | null {
   const packageJsonPath = path.join(cacheDir, "node_modules", packageName, "package.json");

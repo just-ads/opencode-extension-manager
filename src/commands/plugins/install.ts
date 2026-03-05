@@ -1,38 +1,12 @@
 import { Command } from "commander";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { readConfig, writeConfig, addPlugin } from "../../core/config.js";
+import { addPlugin, readConfig, writeConfig } from "../../core/config.js";
 import { detectPM, pmInstall } from "../../core/pm.js";
-import { getPluginsDir, getCacheDir } from "../../utils/paths.js";
-import { extractPackageName } from "../../utils/package.js";
 import { logger } from "../../utils/logger.js";
-
-function resolveSource(input: string): {
-  type: "npm" | "git" | "local";
-  value: string;
-} {
-  if (
-    input.startsWith(".") ||
-    input.startsWith("/") ||
-    input.startsWith("~") ||
-    /^[A-Za-z]:[\\/]/.test(input) ||
-    fs.existsSync(input)
-  ) {
-    return { type: "local", value: path.resolve(input) };
-  }
-
-  if (
-    input.startsWith("git+") ||
-    input.startsWith("git://") ||
-    input.startsWith("https://github.com/") ||
-    input.startsWith("git@") ||
-    input.endsWith(".git")
-  ) {
-    return { type: "git", value: input };
-  }
-
-  return { type: "npm", value: input };
-}
+import { extractPackageName } from "../../utils/package.js";
+import { getCacheDir, getPluginsDir } from "../../utils/paths.js";
+import { resolvePluginSource } from "../../utils/plugin-source.js";
 
 function installLocal(sourcePath: string, scope: "global" | "project", cwd?: string): string {
   const pluginsDir = getPluginsDir(scope, cwd);
@@ -63,7 +37,7 @@ export function createInstallCommand(): Command {
     .description("Install an opencode plugin")
     .action(async (source: string, opts: { global?: boolean; dryRun?: boolean }) => {
       const scope = opts.global ? "global" : "project";
-      const resolved = resolveSource(source);
+      const resolved = resolvePluginSource(source);
 
       logger.info(`Installing plugin from ${resolved.type} source: ${resolved.value}`);
 

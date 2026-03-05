@@ -1,16 +1,17 @@
-import { execSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { extractPackageName } from "../utils/package.js";
 import { getCacheDir, getPluginsDir } from "../utils/paths.js";
+import { type PluginSource, detectPluginSource } from "../utils/plugin-source.js";
 import { readConfig } from "./config.js";
+import { detectPM, pmExec, type PackageManager } from "./pm.js";
 
 export type Scope = "global" | "project";
 
 export interface PluginListItem {
   name: string;
   scope: Scope;
-  source: "npm" | "local";
+  source: PluginSource;
   installed: string;
   latest: string;
   updatable: boolean;
@@ -21,14 +22,96 @@ interface LoosePluginConfig {
   plugins?: unknown;
 }
 
-function isLocalPluginSpecifier(input: string): boolean {
-  return (
-    input.startsWith("file://") ||
-    input.startsWith(".") ||
-    input.startsWith("/") ||
-    input.startsWith("~") ||
-    /^[A-Za-z]:[\\/]/.test(input)
-  );
+function getPMExecutionOrder(): PackageManager[] {
+  const preferredPM = detectPM();
+  return preferredPM === "bun" ? ["bun", "npm"] : ["npm", "bun"];
+}
+
+function findVersionInDependencyTree(node: unknown, packageName: string): string | null {
+  if (Array.isArray(node)) {
+    for (const value of node) {
+      const found = findVersionInDependencyTree(value, packageName);
+      if (found) {
+        return found;
+      }
+    }
+    return null;
+  }
+
+  if (!node || typeof node !== "object") {
+    return null;
+  }
+
+  const record = node as Record<string, unknown>;
+  const directValue = record[packageName];
+  if (directValue && typeof directValue === "object" && !Array.isArray(directValue)) {
+    const directVersion = (directValue as { version?: unknown }).version;
+    if (typeof directVersion === "string" && directVersion.length > 0) {
+      return directVersion;
+    }
+  }
+
+  const name = record.name;
+  const version = record.version;
+  if (name === packageName && typeof version === "string" && version.length > 0) {
+    return version;
+  }
+
+  for (const value of Object.values(record)) {
+    const found = findVersionInDependencyTree(value, packageName);
+    if (found) {
+      return found;
+    }
+  }
+
+  return null;
+}
+
+function getInstalledVersionFromPM(packageName: string, cacheDir: string): string {
+  for (const pm of getPMExecutionOrder()) {
+    try {
+      if (pm === "bun") {
+        const output = pmExec(pm, ["pm", "ls", "--json"], cacheDir);
+        const parsed = JSON.parse(output) as unknown;
+        const version = findVersionInDependencyTree(parsed, packageName);
+        if (version) {
+          return version;
+        }
+        continue;
+      }
+
+      const output = pmExec(pm, ["ls", packageName, "--json", "--depth=0"], cacheDir);
+      const data = JSON.parse(output) as {
+        dependencies?: Record<string, { version?: string }>;
+      };
+      const version = data.dependencies?.[packageName]?.version;
+      if (version) {
+        return version;
+      }
+    } catch {
+      // Try next package manager
+    }
+  }
+
+  return "n/a";
+}
+
+function getLatestVersionFromPM(packageName: string): string {
+  for (const pm of getPMExecutionOrder()) {
+    try {
+      const output = pm === "bun"
+        ? pmExec(pm, ["pm", "view", packageName, "version"])
+        : pmExec(pm, ["view", packageName, "version"]);
+      const version = output.trim();
+      if (version.length > 0) {
+        return version;
+      }
+    } catch {
+      // Try next package manager
+    }
+  }
+
+  return "n/a";
 }
 
 function toStringArray(value: unknown): string[] {
@@ -50,35 +133,15 @@ function getInstalledPluginVersion(packageName: string): string {
       return pkg.version;
     }
   } catch {
-    // continue to npm ls fallback
+    // continue to package-manager lookup
   }
 
-  try {
-    const output = execSync(`npm ls ${bareName} --json --depth=0 2>nul`, {
-      encoding: "utf-8",
-      stdio: ["ignore", "pipe", "ignore"],
-      cwd: cacheDir,
-    });
-    const data = JSON.parse(output) as {
-      dependencies?: Record<string, { version?: string }>;
-    };
-    return data.dependencies?.[bareName]?.version ?? "n/a";
-  } catch {
-    return "n/a";
-  }
+  return getInstalledVersionFromPM(bareName, cacheDir);
 }
 
 function getLatestPluginVersion(packageName: string): string {
   const bareName = extractPackageName(packageName);
-  try {
-    const output = execSync(`npm view ${bareName} version 2>nul`, {
-      encoding: "utf-8",
-      stdio: ["ignore", "pipe", "ignore"],
-    });
-    return output.trim() || "n/a";
-  } catch {
-    return "n/a";
-  }
+  return getLatestVersionFromPM(bareName);
 }
 
 function mergePluginItems(items: PluginListItem[]): PluginListItem[] {
@@ -118,12 +181,13 @@ export function collectPluginsForScope(scope: Scope, cwd?: string): PluginListIt
   const pluginSpecs = [...toStringArray(raw.plugin), ...toStringArray(raw.plugins)];
 
   const fromConfig = pluginSpecs.map((spec) => {
-    if (isLocalPluginSpecifier(spec)) {
+    const source = detectPluginSource(spec);
+    if (source === "local") {
       const localSpec = spec.replace(/^file:\/\//, "");
       return {
         name: path.basename(localSpec),
         scope,
-        source: "local" as const,
+        source,
         installed: "n/a",
         latest: "n/a",
         updatable: false,
@@ -136,7 +200,7 @@ export function collectPluginsForScope(scope: Scope, cwd?: string): PluginListIt
     return {
       name,
       scope,
-      source: "npm" as const,
+      source,
       installed,
       latest,
       updatable: installed !== "n/a" && latest !== "n/a" && installed !== latest,
