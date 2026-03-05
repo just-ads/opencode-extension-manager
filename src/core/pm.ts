@@ -1,11 +1,11 @@
-import { execSync } from "node:child_process";
+import {execSync} from "node:child_process";
 
 export type PackageManager = "bun" | "npm";
 
 /** Detect which package manager is available, preferring bun */
 export function detectPM(): PackageManager {
   try {
-    execSync("bun --version", { stdio: "ignore" });
+    execSync("bun --version", {stdio: "ignore"});
     return "bun";
   } catch {
     return "npm";
@@ -46,20 +46,32 @@ export function pmUninstall(
   return pmExec(pm, [uninstallCmd, packageName], cwd);
 }
 
+/**
+ * Upgrade an npm package
+ */
+export function pmUpgrade(
+  pm: PackageManager,
+  packageName: string,
+  latest?: boolean,
+  cwd?: string
+) {
+  let upgradeCmd = `update ${packageName}`;
+  if (latest) {
+    upgradeCmd = pm === 'bun' ? `update ${packageName} --latest` : `install ${packageName}@latest`;
+  }
+  return pmExec(pm, [upgradeCmd], cwd);
+}
+
 /** Get installed package info from npm registry */
 export function pmInfo(
   pm: PackageManager,
   packageName: string
 ): Record<string, unknown> | null {
-  try {
-    const output = pmExec(pm, [
-      pm === "bun" ? "pm" : "view",
-      ...(pm === "bun" ? ["ls", "--json"] : [packageName, "--json"]),
-    ]);
-    return JSON.parse(output) as Record<string, unknown>;
-  } catch {
-    return null;
-  }
+  const output = pmExec(pm, [
+    pm === "bun" ? "pm" : "view",
+    ...(pm === "bun" ? ["ls", "--json"] : [packageName, "--json"]),
+  ]);
+  return JSON.parse(output) as Record<string, unknown>;
 }
 
 /** Check for outdated packages */
@@ -67,9 +79,5 @@ export function pmOutdated(
   pm: PackageManager,
   cwd?: string
 ): string {
-  try {
-    return pmExec(pm, ["outdated", "--json"], cwd);
-  } catch {
-    return "{}";
-  }
+  return pmExec(pm, ["outdated", "--json"], cwd);
 }
