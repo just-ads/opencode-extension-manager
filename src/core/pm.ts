@@ -2,6 +2,8 @@ import {execSync} from "node:child_process";
 
 export type PackageManager = "bun" | "npm";
 
+export type Dependencies = Record<string, string>;
+
 /** Detect which package manager is available, preferring bun */
 export function detectPM(): PackageManager {
   try {
@@ -24,6 +26,21 @@ export function pmExec(
     encoding: "utf-8",
     stdio: ["ignore", "pipe", "pipe"],
   });
+}
+
+export function pmList(pm: PackageManager, cwd?: string): Dependencies {
+  if (pm === 'bun') {
+    const out = pmExec('bun', ["pm pkg get dependencies"]);
+    return JSON.parse(out);
+  } else {
+    const out = pmExec('npm', ["list --json"]);
+    const pkg = JSON.parse(out);
+    const dependencies: Record<string, string> = {};
+    for (const k in pkg['dependencies']) {
+      dependencies[k] = pkg['dependencies'][k].version
+    }
+    return dependencies
+  }
 }
 
 /** Install an npm package */
@@ -67,10 +84,7 @@ export function pmInfo(
   pm: PackageManager,
   packageName: string
 ): Record<string, unknown> | null {
-  const output = pmExec(pm, [
-    pm === "bun" ? "pm" : "view",
-    ...(pm === "bun" ? ["ls", "--json"] : [packageName, "--json"]),
-  ]);
+  const output = pmExec(pm, [pm === "bun" ? "info" : "view", packageName, "--json",]);
   return JSON.parse(output) as Record<string, unknown>;
 }
 

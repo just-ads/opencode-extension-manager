@@ -1,5 +1,6 @@
 import { Command } from "commander";
-import { collectPlugins, resolveScopes } from "../core/extensions.js";
+import { collectPlugins } from "../core/plugin.js";
+import { resolveScopes } from "../core/scopes.js";
 
 function printTable(headers: string[], rows: string[][]): void {
   const widths = headers.map((header, idx) => {

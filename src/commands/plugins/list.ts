@@ -1,6 +1,6 @@
 import { Command } from "commander";
-import type { PluginListItem } from "../../core/extensions.js";
-import { collectPlugins, resolveScopes } from "../../core/extensions.js";
+import { collectPlugins, type PluginListItem } from "../../core/plugin.js";
+import { resolveScopes } from "../../core/scopes.js";
 import { logger } from "../../utils/logger.js";
 
 function printTable(headers: string[], rows: string[][]): void {

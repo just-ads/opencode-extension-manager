@@ -1,145 +1,158 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { getConfigFilePath, resolveConfigFilePath } from "../utils/paths.js";
+import { parse, stringify, type CommentJSONValue } from "comment-json";
 
-/**
- * Strip JSONC comments (// and /* *​/) while preserving strings.
- * Naive regex approaches break on URLs like "https://..." inside strings.
- */
-function stripJsoncComments(input: string): string {
-  let result = "";
-  let i = 0;
-  const len = input.length;
+import {
+  getConfigFiles,
+  getGlobalConfigFilePath,
+  getProjectConfigFilePath,
+  type ExtensionType,
+  type ConfigPathSource,
+  type ConfigScope,
+} from "./paths.js";
 
-  while (i < len) {
-    const ch = input[i];
-
-    // String literal — copy verbatim until closing quote
-    if (ch === '"') {
-      result += ch;
-      i++;
-      while (i < len) {
-        const sc = input[i];
-        result += sc;
-        i++;
-        if (sc === "\\") {
-          // escaped char — copy next char too
-          if (i < len) {
-            result += input[i];
-            i++;
-          }
-        } else if (sc === '"') {
-          break;
-        }
-      }
-      continue;
-    }
-
-    // Single-line comment
-    if (ch === "/" && i + 1 < len && input[i + 1] === "/") {
-      // Skip until end of line
-      i += 2;
-      while (i < len && input[i] !== "\n") {
-        i++;
-      }
-      continue;
-    }
-
-    // Block comment
-    if (ch === "/" && i + 1 < len && input[i + 1] === "*") {
-      i += 2;
-      while (i + 1 < len && !(input[i] === "*" && input[i + 1] === "/")) {
-        i++;
-      }
-      i += 2; // skip */
-      continue;
-    }
-
-    result += ch;
-    i++;
-  }
-
-  return result;
-}
+const DEFAULT_SCHEMA = "https://opencode.ai/config.json";
 
 export interface OpencodeConfig {
   $schema?: string;
   plugin?: string[];
-  mcp?: Record<string, unknown>;
+  plugins?: string[];
+  skills?: string[];
+  mcps?: string[];
+  instructions?: unknown[];
   [key: string]: unknown;
 }
 
-/** Read opencode.json, returning parsed config or empty default */
-export function readConfig(scope?: "global" | "project", cwd?: string): {
-  config: OpencodeConfig;
-  filePath: string;
-  scope: "global" | "project";
-} {
-  let filePath: string;
-  let resolvedScope: "global" | "project";
-
-  if (scope) {
-    filePath = getConfigFilePath(scope, cwd);
-    resolvedScope = scope;
-  } else {
-    const resolved = resolveConfigFilePath(cwd);
-    filePath = resolved.path;
-    resolvedScope = resolved.scope;
-  }
-
-  if (!fs.existsSync(filePath)) {
-    return {
-      config: { $schema: "https://opencode.ai/config.json" },
-      filePath,
-      scope: resolvedScope,
-    };
-  }
-
-  const raw = fs.readFileSync(filePath, "utf-8");
-  // Strip JSONC comments while preserving strings (which may contain //)
-  const stripped = stripJsoncComments(raw);
-
-  try {
-    const config = JSON.parse(stripped) as OpencodeConfig;
-    return { config, filePath, scope: resolvedScope };
-  } catch {
-    throw new Error(`Failed to parse config: ${filePath}`);
+function getExtensionConfigKeys(type: ExtensionType): string[] {
+  switch (type) {
+    case "plugins":
+      return ["plugin", "plugins"];
+    case "skills":
+      return ["skills"];
+    case "mcps":
+      return ["mcps"];
   }
 }
 
-/** Write config back to opencode.json */
-export function writeConfig(
-  config: OpencodeConfig,
-  filePath: string
-): void {
+function toStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.filter((item): item is string => typeof item === "string");
+}
+
+function unique<T>(items: T[]): T[] {
+  return [...new Set(items)];
+}
+
+function createDefaultConfig(): OpencodeConfig {
+  return {
+    $schema: DEFAULT_SCHEMA,
+    plugin: [],
+  };
+}
+
+export function normalizeConfig(config: OpencodeConfig): OpencodeConfig {
+  const normalized: OpencodeConfig = {
+    ...config,
+    $schema: typeof config.$schema === "string" && config.$schema.length > 0 ? config.$schema : DEFAULT_SCHEMA,
+    plugin: unique([...toStringArray(config.plugin), ...toStringArray(config.plugins)]),
+    skills: unique(toStringArray(config.skills)),
+    mcps: unique(toStringArray(config.mcps)),
+  };
+
+  delete normalized.plugins;
+  return normalized;
+}
+
+export function getConfiguredExtensionSpecs(config: OpencodeConfig, type: ExtensionType): string[] {
+  const keys = getExtensionConfigKeys(type);
+  return unique(keys.flatMap((key) => toStringArray(config[key])));
+}
+
+function ensureOpencodeConfig(value: CommentJSONValue | undefined): OpencodeConfig {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return createDefaultConfig();
+  }
+
+  return normalizeConfig({ ...(value as Record<string, unknown>) });
+}
+
+export function loadConfig(filePath: string | undefined): CommentJSONValue | undefined {
+  if (!filePath || !fs.existsSync(filePath)) {
+    return undefined;
+  }
+
+  try {
+    const text = fs.readFileSync(filePath, "utf8");
+    return parse(text) as CommentJSONValue;
+  } catch (error) {
+    console.error(`Failed to parse config at ${filePath}:`, error);
+    return undefined;
+  }
+}
+
+export function writeConfig(config: OpencodeConfig, filePath: string | undefined): void {
+  if (!filePath) {
+    throw new Error("File path is required to write config");
+  }
+
   const dir = path.dirname(filePath);
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
-  fs.writeFileSync(filePath, JSON.stringify(config, null, 2) + "\n", "utf-8");
+
+  const normalized = normalizeConfig(config);
+  const content = stringify(normalized as unknown as CommentJSONValue, null, 2);
+  fs.writeFileSync(filePath, content, "utf8");
 }
 
-/** Add a plugin to the config's plugin array */
-export function addPlugin(config: OpencodeConfig, name: string): boolean {
-  if (!config.plugin) {
-    config.plugin = [];
-  }
-  if (config.plugin.includes(name)) {
-    return false; // already exists
-  }
-  config.plugin.push(name);
-  return true;
+function getPathBySource(source: ConfigPathSource): string | undefined {
+  const target = getConfigFiles().find((configFile) => configFile.source === source);
+  return target?.path;
 }
 
-/** Remove a plugin from the config's plugin array */
-export function removePlugin(config: OpencodeConfig, name: string): boolean {
-  if (!config.plugin) {
-    return false;
+export function loadConfigBySource(source: ConfigPathSource): OpencodeConfig {
+  const filePath = getPathBySource(source);
+  return ensureOpencodeConfig(loadConfig(filePath));
+}
+
+export function writeConfigBySource(config: OpencodeConfig, source: ConfigPathSource): void {
+  const filePath = getPathBySource(source);
+  if (!filePath) {
+    throw new Error(`Cannot determine file path for source: ${source}`);
   }
-  const idx = config.plugin.indexOf(name);
-  if (idx === -1) {
-    return false;
-  }
-  config.plugin.splice(idx, 1);
-  return true;
+
+  writeConfig(config, filePath);
+}
+
+export function readConfig(scope: ConfigScope, cwd?: string): { config: OpencodeConfig; filePath: string } {
+  const filePath = scope === "global" ? getGlobalConfigFilePath() : getProjectConfigFilePath(cwd);
+  return {
+    config: ensureOpencodeConfig(loadConfig(filePath)),
+    filePath,
+  };
+}
+
+export function resolveOpencodeConfig(): OpencodeConfig {
+  const configs = getConfigFiles()
+    .map((configFile) => ensureOpencodeConfig(loadConfig(configFile.path)))
+    .filter((config) => config !== undefined);
+
+  return configs.reduce<OpencodeConfig>((acc, current) => {
+    const merged: OpencodeConfig = {
+      ...acc,
+      ...current,
+      plugin: unique([...toStringArray(acc.plugin), ...toStringArray(current.plugin)]),
+    };
+
+    const accInstructions = Array.isArray(acc.instructions) ? acc.instructions : [];
+    const currentInstructions = Array.isArray(current.instructions) ? current.instructions : [];
+    if (accInstructions.length > 0 || currentInstructions.length > 0) {
+      merged.instructions = unique([...accInstructions, ...currentInstructions]);
+    }
+
+    return normalizeConfig(merged);
+  }, createDefaultConfig());
 }

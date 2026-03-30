@@ -1,31 +1,12 @@
 import { Command } from "commander";
 import * as fs from "node:fs";
-import * as path from "node:path";
-import { addPlugin, readConfig, writeConfig } from "../../core/config.js";
+import { readConfig, writeConfig } from "../../core/config.js";
 import { detectPM, pmInstall } from "../../core/pm.js";
+import { addPlugin, findPluginEntry, installLocalPlugin } from "../../core/plugin.js";
+import { getCacheDir, getPluginsDir } from "../../core/paths.js";
 import { logger } from "../../utils/logger.js";
 import { extractPackageName } from "../../utils/package.js";
-import { getCacheDir, getPluginsDir } from "../../utils/paths.js";
 import { resolvePluginSource } from "../../utils/plugin-source.js";
-
-function installLocal(sourcePath: string, scope: "global" | "project", cwd?: string): string {
-  const pluginsDir = getPluginsDir(scope, cwd);
-  if (!fs.existsSync(pluginsDir)) {
-    fs.mkdirSync(pluginsDir, { recursive: true });
-  }
-
-  const basename = path.basename(sourcePath);
-  const destPath = path.join(pluginsDir, basename);
-
-  const stat = fs.statSync(sourcePath);
-  if (stat.isDirectory()) {
-    fs.cpSync(sourcePath, destPath, { recursive: true });
-  } else {
-    fs.copyFileSync(sourcePath, destPath);
-  }
-
-  return basename;
-}
 
 export function createInstallCommand(): Command {
   return new Command("install")
@@ -51,7 +32,7 @@ export function createInstallCommand(): Command {
         if (resolved.type === "npm" || resolved.type === "git") {
           const packageName = resolved.value;
           const configName = extractPackageName(packageName);
-          const existingEntry = config.plugin?.find((p) => extractPackageName(p) === configName);
+          const existingEntry = findPluginEntry(config, configName);
 
           if (existingEntry) {
             logger.warn(`Plugin "${configName}" is already installed as "${existingEntry}".`);
@@ -64,7 +45,7 @@ export function createInstallCommand(): Command {
             return;
           }
 
-          addPlugin(config, configName);
+          addPlugin(config, packageName);
           writeConfig(config, filePath);
           logger.dim(`Updated ${filePath}`);
 
@@ -88,7 +69,7 @@ export function createInstallCommand(): Command {
           return;
         }
 
-        const installedName = installLocal(resolved.value, scope);
+        const installedName = installLocalPlugin(resolved.value, scope);
         logger.success(`Installed local plugin "${installedName}" to ${getPluginsDir(scope)}`);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);

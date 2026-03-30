@@ -1,9 +1,9 @@
 import { Command } from "commander";
-import * as path from "node:path";
 import * as fs from "node:fs";
-import { readConfig, writeConfig, removePlugin } from "../../core/config.js";
+import { readConfig, writeConfig } from "../../core/config.js";
 import { detectPM, pmUninstall } from "../../core/pm.js";
-import { getPluginsDir, getCacheDir } from "../../utils/paths.js";
+import { findLocalPluginPath, findPluginEntry, removeLocalPlugin, removePlugin } from "../../core/plugin.js";
+import { getCacheDir } from "../../core/paths.js";
 import { extractPackageName } from "../../utils/package.js";
 import { logger } from "../../utils/logger.js";
 
@@ -21,20 +21,9 @@ export function createUninstallCommand(): Command {
       try {
         const { config, filePath } = readConfig(scope);
         const bareName = extractPackageName(name);
-        const configEntry = config.plugin?.find((p) => extractPackageName(p) === bareName);
+        const configEntry = findPluginEntry(config, bareName);
         const inConfig = Boolean(configEntry);
-
-        const pluginsDir = getPluginsDir(scope);
-        const localCandidates = [name, `${name}.ts`, `${name}.js`];
-        let localPath: string | null = null;
-
-        for (const candidate of localCandidates) {
-          const p = path.join(pluginsDir, candidate);
-          if (fs.existsSync(p)) {
-            localPath = p;
-            break;
-          }
-        }
+        const localPath = findLocalPluginPath(name, scope);
 
         if (!inConfig && !localPath) {
           logger.error(`Plugin "${name}" is not installed.`);
@@ -73,12 +62,7 @@ export function createUninstallCommand(): Command {
         }
 
         if (localPath) {
-          const stat = fs.statSync(localPath);
-          if (stat.isDirectory()) {
-            fs.rmSync(localPath, { recursive: true });
-          } else {
-            fs.unlinkSync(localPath);
-          }
+          removeLocalPlugin(localPath);
           logger.dim(`Deleted ${localPath}`);
         }
 

@@ -1,6 +1,6 @@
 import { Command } from "commander";
 import * as fs from "node:fs";
-import { getConfigFilePath } from "../../utils/paths.js";
+import { getGlobalConfigFilePath, getProjectConfigFilePath } from "../../core/paths.js";
 import { writeConfig, type OpencodeConfig } from "../../core/config.js";
 import { logger } from "../../utils/logger.js";
 
@@ -10,8 +10,7 @@ export function createInitCommand(): Command {
     .option("--force", "overwrite existing config")
     .description("Initialize an opencode.json config file")
     .action((opts: { global?: boolean; force?: boolean }) => {
-      const scope = opts.global ? "global" : "project";
-      const filePath = getConfigFilePath(scope);
+      const filePath = opts.global ? getGlobalConfigFilePath() : getProjectConfigFilePath();
 
       if (fs.existsSync(filePath) && !opts.force) {
         logger.warn(`Config already exists: ${filePath}`);

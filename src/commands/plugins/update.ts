@@ -1,27 +1,12 @@
 import {Command} from "commander";
 import * as fs from "node:fs";
-import * as path from "node:path";
 import {readConfig} from "../../core/config.js";
 import {detectPM, pmUpgrade} from "../../core/pm.js";
+import { getConfiguredPluginSpecs, getInstalledPluginVersion } from "../../core/plugin.js";
+import {getCacheDir} from "../../core/paths.js";
 import {logger} from "../../utils/logger.js";
 import {extractPackageName} from "../../utils/package.js";
-import {getCacheDir} from "../../utils/paths.js";
-import {isLocalPluginSpecifier} from "../../utils/plugin-source.js";
-
-function getInstalledVersion(cacheDir: string, packageName: string): string | null {
-  const packageJsonPath = path.join(cacheDir, "node_modules", packageName, "package.json");
-  if (!fs.existsSync(packageJsonPath)) {
-    return null;
-  }
-
-  try {
-    const raw = fs.readFileSync(packageJsonPath, "utf-8");
-    const parsed = JSON.parse(raw) as {version?: unknown};
-    return typeof parsed.version === "string" && parsed.version.length > 0 ? parsed.version : null;
-  } catch {
-    return null;
-  }
-}
+import {detectPluginSource, isLocalPluginSpecifier} from "../../utils/plugin-source.js";
 
 export function createUpdateCommand(): Command {
   return new Command("update")
@@ -37,7 +22,13 @@ export function createUpdateCommand(): Command {
 
       try {
         const {config} = readConfig(scope);
-        const plugins = (config.plugin ?? []).filter((p) => !isLocalPluginSpecifier(p));
+        const plugins = getConfiguredPluginSpecs(config).filter((p) => {
+          if (isLocalPluginSpecifier(p)) {
+            return false;
+          }
+
+          return detectPluginSource(p) !== "git";
+        });
 
         if (plugins.length === 0) {
           logger.info("No npm plugins installed to update.");
@@ -66,9 +57,9 @@ export function createUpdateCommand(): Command {
 
           logger.info(`Updating "${pkgName}"...`);
           try {
-            const beforeVersion = getInstalledVersion(cacheDir, pkgName);
+            const beforeVersion = getInstalledPluginVersion(pkgName, cacheDir);
             pmUpgrade(pm, pkgName, opts.latest, cacheDir);
-            const afterVersion = getInstalledVersion(cacheDir, pkgName);
+            const afterVersion = getInstalledPluginVersion(pkgName, cacheDir);
             if (afterVersion) {
               const fromSuffix = beforeVersion && beforeVersion !== afterVersion ? ` (from ${beforeVersion})` : "";
               logger.success(`Updated "${pkgName}" to ${afterVersion}${fromSuffix}`);
