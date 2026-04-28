@@ -1,6 +1,5 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { resolvePluginsPath } from "../utils/compatible.js";
 
 import { collectConfigExtensionSpecs, collectLocalExtensionEntries } from "./discovery.js";
 import { detectPM, pmInfo } from "./pm.js";
@@ -102,7 +101,7 @@ export function removeLocalPlugin(pluginPath: string): void {
 
 export function getInstalledPluginVersion(packageName: string, cacheDir = getCacheDir()): string | null {
   const bareName = extractPackageName(packageName);
-  const packageJsonPath = path.join(cacheDir, "node_modules", resolvePluginsPath(bareName), "package.json");
+  const packageJsonPath = path.join(cacheDir, "node_modules", bareName, "package.json");
 
   try {
     const raw = fs.readFileSync(packageJsonPath, "utf-8");
