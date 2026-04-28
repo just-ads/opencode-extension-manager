@@ -11,7 +11,7 @@ const program = new Command();
 program
   .name("oem")
   .description("OpenCode extension manager")
-  .version("0.1.0");
+  .version("0.1.4");
 
 program.addCommand(createListCommand());
 program.addCommand(createPluginsCommand());

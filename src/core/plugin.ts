@@ -1,13 +1,15 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { resolvePluginsPath } from "../utils/compatible.js";
 
 import { collectConfigExtensionSpecs, collectLocalExtensionEntries } from "./discovery.js";
-import {detectPM, pmInfo} from "./pm.js";
-import {getCacheDir, getPluginsDir, type ConfigScope} from "./paths.js";
-import type {OpencodeConfig} from "./config.js";
-import type {Scope} from "./scopes.js";
-import {extractPackageName} from "../utils/package.js";
-import {detectPluginSource, type PluginSource} from "../utils/plugin-source.js";
+import { detectPM, pmInfo } from "./pm.js";
+import { getCacheDir, getPluginsDir, type ConfigScope } from "./paths.js";
+import { extractPackageName } from "../utils/package.js";
+import { detectPluginSource, type PluginSource } from "../utils/plugin-source.js";
+
+import type { OpencodeConfig } from "./config.js";
+import type { Scope } from "./scopes.js";
 
 export interface PluginListItem {
   name: string;
@@ -24,8 +26,8 @@ function toPluginList(config: OpencodeConfig): string[] {
 
 function getPluginPackageInfoFromPM(packageName: string): Record<string, unknown> | null {
   const bareName = extractPackageName(packageName);
-  const pm = detectPM();
-  return pmInfo(pm, bareName);
+  // const pm = detectPM();
+  return pmInfo('npm', bareName);
 }
 
 export function getConfiguredPluginSpecs(config: OpencodeConfig): string[] {
@@ -59,14 +61,14 @@ export function removePlugin(config: OpencodeConfig, packageName: string): strin
 export function installLocalPlugin(sourcePath: string, scope: ConfigScope, cwd?: string): string {
   const pluginsDir = getPluginsDir(scope, cwd);
   if (!fs.existsSync(pluginsDir)) {
-    fs.mkdirSync(pluginsDir, {recursive: true});
+    fs.mkdirSync(pluginsDir, { recursive: true });
   }
 
   const basename = path.basename(sourcePath);
   const destinationPath = path.join(pluginsDir, basename);
   const stat = fs.statSync(sourcePath);
   if (stat.isDirectory()) {
-    fs.cpSync(sourcePath, destinationPath, {recursive: true});
+    fs.cpSync(sourcePath, destinationPath, { recursive: true });
   } else {
     fs.copyFileSync(sourcePath, destinationPath);
   }
@@ -91,7 +93,7 @@ export function findLocalPluginPath(name: string, scope: ConfigScope, cwd?: stri
 export function removeLocalPlugin(pluginPath: string): void {
   const stat = fs.statSync(pluginPath);
   if (stat.isDirectory()) {
-    fs.rmSync(pluginPath, {recursive: true, force: true});
+    fs.rmSync(pluginPath, { recursive: true, force: true });
     return;
   }
 
@@ -100,7 +102,7 @@ export function removeLocalPlugin(pluginPath: string): void {
 
 export function getInstalledPluginVersion(packageName: string, cacheDir = getCacheDir()): string | null {
   const bareName = extractPackageName(packageName);
-  const packageJsonPath = path.join(cacheDir, "node_modules", bareName, "package.json");
+  const packageJsonPath = path.join(cacheDir, "node_modules", resolvePluginsPath(bareName), "package.json");
 
   try {
     const raw = fs.readFileSync(packageJsonPath, "utf-8");
@@ -175,8 +177,8 @@ function mergePluginItems(items: PluginListItem[]): PluginListItem[] {
 }
 
 export function collectPluginsForScope(scope: Scope, cwd?: string): PluginListItem[] {
-  const fromConfig = collectConfigExtensionSpecs("plugins", scope, cwd).map(({spec}) => toPluginListItem(spec, scope));
-  const fromDirectory = collectLocalExtensionEntries("plugins", scope, cwd).map(({name}) => ({
+  const fromConfig = collectConfigExtensionSpecs("plugins", scope, cwd).map(({ spec }) => toPluginListItem(spec, scope));
+  const fromDirectory = collectLocalExtensionEntries("plugins", scope, cwd).map(({ name }) => ({
     name,
     scope,
     source: "local" as const,
